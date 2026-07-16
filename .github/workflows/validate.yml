@@ -1,0 +1,54 @@
+name: Validate JSON Schemas
+on:
+  pull_request:
+    paths:
+      - 'test_cases/**'
+      - 'schema/**'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install jsonschema
+        run: pip install jsonschema
+      - name: Validate Test Cases
+        run: |
+          python -c '
+          import os
+          import json
+          import jsonschema
+          import sys
+
+          with open("schema/test_case.schema.json") as f:
+              schema = json.load(f)
+
+          errors = 0
+          for root, dirs, files in os.walk("test_cases"):
+              for file in files:
+                  if file.endswith(".json"):
+                      path = os.path.join(root, file)
+                      with open(path) as f:
+                          try:
+                              data = json.load(f)
+                              jsonschema.validate(instance=data, schema=schema)
+                              
+                              expected_id = file[:-5]
+                              if data.get("id") != expected_id:
+                                  print(f"Error in {path}: id \"{data.get(\"id\")}\" does not match filename \"{expected_id}\"")
+                                  errors += 1
+                                  
+                          except jsonschema.exceptions.ValidationError as e:
+                              print(f"Validation error in {path}: {e.message}")
+                              errors += 1
+                          except json.JSONDecodeError as e:
+                              print(f"JSON decode error in {path}: {e}")
+                              errors += 1
+          if errors > 0:
+              sys.exit(1)
+          print("All tests validated successfully.")
+          '

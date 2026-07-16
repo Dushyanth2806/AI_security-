@@ -1,0 +1,4 @@
+/test_cases/injection/* @jailbreak-teammate-1 @jailbreak-teammate-2
+/test_cases/jailbreak/* @injection-teammate-1 @injection-teammate-2
+/redteam_console.py @jailbreak-teammate-1 @jailbreak-teammate-2 @injection-teammate-1 @injection-teammate-2
+/schema/* @jailbreak-teammate-1 @jailbreak-teammate-2 @injection-teammate-1 @injection-teammate-2
