@@ -69,6 +69,13 @@ def run_openai(api_key, model, system_prompt, user_prompt):
 
 # --- SECTION: open-source model calls ---
 def run_opensource(base_url, model, api_key, system_prompt, user_prompt):
+    final_url = base_url.rstrip("/")
+    if not final_url.endswith("/api/chat"):
+        if final_url.endswith("/api"):
+            final_url = f"{final_url}/chat"
+        else:
+            final_url = f"{final_url}/api/chat"
+            
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -78,16 +85,57 @@ def run_opensource(base_url, model, api_key, system_prompt, user_prompt):
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
-        ]
+        ],
+        "stream": False,
+        "max_tokens": 1024
     }
     
     start_time = time.time()
     try:
-        resp = requests.post(f"{base_url}/chat/completions", headers=headers, json=payload, timeout=30)
+        resp = requests.post(final_url, headers=headers, json=payload, timeout=30)
         resp.raise_for_status()
-        data = resp.json()
-        latency = int((time.time() - start_time) * 1000)
-        return data["choices"][0]["message"]["content"], latency
+        
+        # Different OpenAI-compatible servers (Ollama, vLLM, LM Studio, hosted providers)
+        # sometimes ignore or partially respect stream:false, so the fallback parsing path matters.
+        try:
+            data = resp.json()
+            if "message" in data and "content" in data["message"]:
+                content = data["message"]["content"]
+                # If content is empty but model provided thinking, show that
+                if not content and "thinking" in data["message"]:
+                    return f"<thinking>\n{data['message']['thinking']}\n</thinking>", latency
+                return content, latency
+            elif "choices" in data:
+                return data["choices"][0]["message"]["content"], latency
+            elif "response" in data:
+                return data["response"], latency
+            else:
+                return str(data), latency
+        except ValueError:
+            # Server ignored stream:false and sent JSON lines
+            full_content = ""
+            for line in resp.text.splitlines():
+                if not line.strip(): continue
+                try:
+                    chunk = json.loads(line)
+                    if "message" in chunk and "content" in chunk["message"]:
+                        full_content += chunk["message"]["content"]
+                    elif "choices" in chunk and len(chunk["choices"]) > 0:
+                        delta = chunk["choices"][0].get("delta", {})
+                        if "content" in delta:
+                            full_content += delta["content"]
+                        elif "message" in chunk["choices"][0] and "content" in chunk["choices"][0]["message"]:
+                            full_content += chunk["choices"][0]["message"]["content"]
+                    elif "response" in chunk:
+                        full_content += chunk["response"]
+                except Exception:
+                    pass
+                    
+            if full_content:
+                return full_content, latency
+            else:
+                raw = resp.text[:300]
+                return f"Error: Failed to parse chunks. Raw: {raw}", latency
     except Exception as e:
         return f"Error: {str(e)}", 0
 
@@ -104,10 +152,10 @@ closed_model = st.sidebar.selectbox("OpenAI Model", [
     "gpt-4o-mini"
 ])
 
-st.sidebar.subheader("Open-Source (OpenAI Compatible)")
+st.sidebar.subheader("Open-Source (Ollama API)")
 ollama_host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-os_base_url = st.sidebar.text_input("Base URL", value=f"{ollama_host}/v1/chat/completions")
-os_model = st.sidebar.text_input("Model Name", value=os.environ.get("OLLAMA_MODEL", "llama3"))
+os_base_url = st.sidebar.text_input("Base URL", value=f"{ollama_host}/api/chat")
+os_model = st.sidebar.text_input("Model Name", value=os.environ.get("OLLAMA_MODEL", "gemma4:e4b"))
 os_api_key = st.sidebar.text_input("API Key (Optional)", value=os.environ.get("OLLAMA_API_KEY", ""), type="password")
 
 st.sidebar.subheader("Mode")
