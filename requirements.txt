@@ -1,4 +1,5 @@
 streamlit
-anthropic
 requests
 jsonschema
+openai
+python-dotenv

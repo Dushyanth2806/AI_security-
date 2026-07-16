@@ -1,14 +1,27 @@
 import streamlit as st
-import anthropic
+import openai
 import requests
 import json
 import time
 import os
+import pandas as pd
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 st.set_page_config(page_title="Red Team Console", layout="wide")
 
-# Initialize session state for logs
+st.markdown(
+    """
+    <style>
+    [data-testid="stDataFrame"] {
+        font-family: monospace;
+    }
+    </style>
+    """, unsafe_allow_html=True
+)
+
 if 'session_logs' not in st.session_state:
     st.session_state.session_logs = []
 
@@ -30,22 +43,27 @@ def check_heuristics(text):
     else:
         return "no-strong-signal"
 
+def get_tag_html(heuristic):
+    color = "#16a34a" if heuristic == "refusal-pattern" else "#d97706"
+    return f'<span style="background-color: {color}; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.8em; font-weight: bold;">{heuristic}</span>'
+
 # --- SECTION: closed-source model calls ---
-def run_anthropic(api_key, model, system_prompt, user_prompt):
+def run_openai(api_key, model, system_prompt, user_prompt):
     if not api_key:
-        return "Error: Missing Anthropic API Key", 0
+        return "Error: Missing OpenAI API Key", 0
     
-    client = anthropic.Anthropic(api_key=api_key)
+    client = openai.OpenAI(api_key=api_key)
     start_time = time.time()
     try:
-        response = client.messages.create(
+        response = client.chat.completions.create(
             model=model,
-            max_tokens=1024,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}]
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ]
         )
         latency = int((time.time() - start_time) * 1000)
-        return response.content[0].text, latency
+        return response.choices[0].message.content, latency
     except Exception as e:
         return f"Error: {str(e)}", 0
 
@@ -79,18 +97,18 @@ st.title("Red Team Console")
 # Sidebar
 st.sidebar.title("Configuration")
 
-st.sidebar.subheader("Closed-Source (Anthropic)")
-anthropic_api_key = st.sidebar.text_input("Anthropic API Key", type="password")
-anthropic_model = st.sidebar.selectbox("Anthropic Model", [
-    "claude-sonnet-4-6",
-    "claude-opus-4-8", 
-    "claude-haiku-4-5-20251001"
+st.sidebar.subheader("Closed-Source (OpenAI)")
+closed_api_key = st.sidebar.text_input("OpenAI API Key", value=os.environ.get("OPENAI_API_KEY", ""), type="password")
+closed_model = st.sidebar.selectbox("OpenAI Model", [
+    "gpt-4o",
+    "gpt-4o-mini"
 ])
 
 st.sidebar.subheader("Open-Source (OpenAI Compatible)")
-os_base_url = st.sidebar.text_input("Base URL", value="http://localhost:8000/v1")
-os_model = st.sidebar.text_input("Model Name", value="llama-3")
-os_api_key = st.sidebar.text_input("API Key (Optional)", type="password")
+ollama_host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+os_base_url = st.sidebar.text_input("Base URL", value=f"{ollama_host}/v1/chat/completions")
+os_model = st.sidebar.text_input("Model Name", value=os.environ.get("OLLAMA_MODEL", "llama3"))
+os_api_key = st.sidebar.text_input("API Key (Optional)", value=os.environ.get("OLLAMA_API_KEY", ""), type="password")
 
 st.sidebar.subheader("Mode")
 test_case_mode = st.sidebar.checkbox("Test case mode")
@@ -132,57 +150,69 @@ else:
 
 if st.button("Run Attack", type="primary"):
     with st.spinner("Running models..."):
-        anthropic_text, anthropic_lat = run_anthropic(anthropic_api_key, anthropic_model, system_prompt, user_prompt)
+        closed_text, closed_lat = run_openai(closed_api_key, closed_model, system_prompt, user_prompt)
         os_text, os_lat = run_opensource(os_base_url, os_model, os_api_key, system_prompt, user_prompt)
         
-        anthropic_heuristic = check_heuristics(anthropic_text)
-        os_heuristic = check_heuristics(os_text)
-        
         st.session_state.current_run = {
-            "anthropic": {"text": anthropic_text, "latency": anthropic_lat, "heuristic": anthropic_heuristic},
-            "opensource": {"text": os_text, "latency": os_lat, "heuristic": os_heuristic},
+            "closed": {"provider": "OpenAI", "model": closed_model, "text": closed_text, "latency": closed_lat, "heuristic": check_heuristics(closed_text)},
+            "opensource": {"text": os_text, "latency": os_lat, "heuristic": check_heuristics(os_text)},
             "timestamp": datetime.now().isoformat(),
-            "prompt_trunc": user_prompt[:50] + "..." if len(user_prompt) > 50 else user_prompt
+            "full_prompt": user_prompt,
+            "prompt_trunc": user_prompt[:60] + "..." if len(user_prompt) > 60 else user_prompt
         }
+
+# Always render the split screen columns
+col1, col2 = st.columns(2)
+
+with col1:
+    if 'current_run' in st.session_state:
+        run = st.session_state.current_run
+        st.subheader(f"Closed-source · {run['closed']['provider']} · {run['closed']['model']}")
+        st.markdown(f"**Latency:** {run['closed']['latency']}ms | **Heuristic:** {get_tag_html(run['closed']['heuristic'])}", unsafe_allow_html=True)
+        st.code(run['closed']['text'], language="text")
+        closed_verdict = st.radio("Manual Verdict (Closed)", ["Safe", "Jailbroken", "Unclear"], horizontal=True, key="closed_verdict")
+    else:
+        st.subheader(f"Closed-source · OpenAI · {closed_model}")
+        st.markdown("*Response will appear here.*")
+
+with col2:
+    st.subheader(f"Open-source · {os_model}")
+    if 'current_run' in st.session_state:
+        run = st.session_state.current_run
+        st.markdown(f"**Latency:** {run['opensource']['latency']}ms | **Heuristic:** {get_tag_html(run['opensource']['heuristic'])}", unsafe_allow_html=True)
+        st.code(run['opensource']['text'], language="text")
+        os_verdict = st.radio("Manual Verdict (Open)", ["Safe", "Jailbroken", "Unclear"], horizontal=True, key="os_verdict")
+    else:
+        st.markdown("*Response will appear here.*")
 
 if 'current_run' in st.session_state:
-    run = st.session_state.current_run
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader(f"Closed-Source ({anthropic_model})")
-        st.caption(f"Latency: {run['anthropic']['latency']} ms | Heuristic: **{run['anthropic']['heuristic']}**")
-        st.text_area("Response", run['anthropic']['text'], height=300, key="anthropic_resp", disabled=True)
-        anthropic_verdict = st.radio("Manual Verdict (Closed)", ["Safe", "Jailbroken", "Unclear"], horizontal=True, key="anthropic_verdict")
-
-    with col2:
-        st.subheader(f"Open-Source ({os_model})")
-        st.caption(f"Latency: {run['opensource']['latency']} ms | Heuristic: **{run['opensource']['heuristic']}**")
-        st.text_area("Response", run['opensource']['text'], height=300, key="os_resp", disabled=True)
-        os_verdict = st.radio("Manual Verdict (Open)", ["Safe", "Jailbroken", "Unclear"], horizontal=True, key="os_verdict")
-        
     if st.button("Log Result"):
         log_entry = {
-            "timestamp": run["timestamp"],
-            "prompt": run["prompt_trunc"],
-            "closed_heuristic": run["anthropic"]["heuristic"],
-            "closed_verdict": anthropic_verdict,
-            "open_heuristic": run["opensource"]["heuristic"],
-            "open_verdict": os_verdict
+            "Time": st.session_state.current_run["timestamp"],
+            "Prompt": st.session_state.current_run["prompt_trunc"],
+            "Closed Provider": st.session_state.current_run["closed"]["provider"],
+            "Closed Heuristic": st.session_state.current_run["closed"]["heuristic"],
+            "Closed Verdict": closed_verdict,
+            "OSS Heuristic": st.session_state.current_run["opensource"]["heuristic"],
+            "OSS Verdict": os_verdict,
+            "Full Prompt": st.session_state.current_run["full_prompt"],
+            "Closed Full Response": st.session_state.current_run["closed"]["text"],
+            "OSS Full Response": st.session_state.current_run["opensource"]["text"],
+            "closed_provider": st.session_state.current_run["closed"]["provider"]
         }
-        st.session_state.session_logs.append(log_entry)
+        st.session_state.session_logs.insert(0, log_entry)
         st.success("Logged successfully!")
 
 st.divider()
 st.subheader("Session Logs")
 
 if st.session_state.session_logs:
-    st.dataframe(st.session_state.session_logs)
+    df_view = pd.DataFrame(st.session_state.session_logs)[["Time", "Prompt", "Closed Provider", "Closed Heuristic", "Closed Verdict", "OSS Heuristic", "OSS Verdict"]]
+    st.dataframe(df_view, use_container_width=True)
     
     logs_json = json.dumps(st.session_state.session_logs, indent=2)
     st.download_button(
-        label="Download Logs as JSON",
+        label="Export session JSON",
         data=logs_json,
         file_name="redteam_session_logs.json",
         mime="application/json"

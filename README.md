@@ -27,3 +27,6 @@ Folder ownership is defined in `CODEOWNERS`. The cross-pair review process ensur
    ```bash
    streamlit run redteam_console.py
    ```
+
+## Configuration
+Before running the console, copy `.env.example` to `.env` and fill in your real credentials. **Never commit the `.env` file or share it outside the team, including with AI coding tools.**
