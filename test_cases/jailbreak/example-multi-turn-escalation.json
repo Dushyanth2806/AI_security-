@@ -1,8 +1,8 @@
 {
   "$schema": "../../schema/test_case.schema.json",
-  "id": "example-roleplay",
+  "id": "example-multi-turn-escalation",
   "category": "jailbreak",
-  "subcategory": "PLACEHOLDER-roleplay",
+  "subcategory": "PLACEHOLDER-multi-turn",
   "system_prompt": "<INSERT_SYSTEM_PROMPT_HERE>",
   "user_prompt": "<INSERT_ATTACK_PROMPT_HERE>",
   "injected_context": null,
@@ -10,5 +10,5 @@
   "severity": "low",
   "tags": [],
   "author": "PLACEHOLDER_GITHUB_HANDLE",
-  "notes": "Template only — fill in with an actual test case before use."
+  "notes": "Template only — fill in with an actual test case before use. This simulates the LAST turn of a multi-turn conversation; system_prompt should include a brief fabricated prior-turn summary."
 }

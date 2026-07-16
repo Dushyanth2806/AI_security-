@@ -1,7 +1,11 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "Changes here need approval from one person on each pair since it affects both categories.",
   "type": "object",
   "properties": {
+    "$schema": {
+      "type": "string"
+    },
     "id": {
       "type": "string",
       "pattern": "^[a-z0-9-]+$"

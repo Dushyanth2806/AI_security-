@@ -1,0 +1,34 @@
+name: Nightly Sweep
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+# NOTE: This workflow requires repository secrets to be configured before it will run successfully:
+# - ANTHROPIC_API_KEY
+# Optional: OSS_BASE_URL, OSS_MODEL, OSS_API_KEY
+# If your team prefers manual-only runs, you can disable the cron schedule.
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run Batch Suite
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OSS_BASE_URL: ${{ secrets.OSS_BASE_URL }}
+          OSS_MODEL: ${{ secrets.OSS_MODEL }}
+          OSS_API_KEY: ${{ secrets.OSS_API_KEY }}
+        run: python scripts/run_batch.py --category all
+      - name: Upload Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-results
+          path: results/*.json
